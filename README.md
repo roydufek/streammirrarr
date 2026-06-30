@@ -35,6 +35,8 @@ Dispatcharr go to **Plugins → reload**, enable Streammirrarr, and configure:
 - **Limit to channel groups** — optional.
 - **Remove mismatched managed streams** — leave on for cleanup.
 - **Daily run time (HH:MM, UTC)** — blank disables the schedule.
+- **Gotify** — optional notifications for scheduled runs (off / on-failure /
+  on-completion). Set your **Gotify server URL** and **app token** to enable.
 
 ## Actions
 

@@ -58,7 +58,7 @@ except Exception:  # pragma: no cover - defensive: never block on websocket impo
     def send_websocket_update(*_a, **_k):
         return None
 
-__version__ = "0.2.0"
+__version__ = "0.2.1"
 
 logger = logging.getLogger("plugins.streammirrarr")
 
@@ -299,13 +299,21 @@ class Plugin:
                 "help_text": "Notify a Gotify endpoint after the daily scheduled run.",
             },
             {
-                "id": "gotify_url",
-                "label": "Gotify message URL (with ?token=…)",
+                "id": "gotify_server_url",
+                "label": "Gotify server URL",
+                "type": "string",
+                "default": "",
+                "placeholder": "https://gotify.example.com",
+                "help_text": "Base URL of your Gotify server (no path).",
+            },
+            {
+                "id": "gotify_token",
+                "label": "Gotify app token",
                 "type": "string",
                 "input_type": "password",
                 "default": "",
-                "placeholder": "https://gotify.example.com/message?token=…",
-                "help_text": "Full Gotify message URL including the app token. Stored in the DB, never committed.",
+                "placeholder": "A…",
+                "help_text": "Your Gotify application token. Stored in the DB, never committed.",
             },
         ]
 
@@ -827,7 +835,12 @@ class Plugin:
             return
         if mode == "on_failure" and ok:
             return
-        url = (settings.get("gotify_url") or "").strip()
+        server = (settings.get("gotify_server_url") or "").strip().rstrip("/")
+        token = (settings.get("gotify_token") or "").strip()
+        if server and token:
+            url = f"{server}/message?token={urllib.parse.quote(token, safe='')}"
+        else:
+            url = (settings.get("gotify_url") or "").strip()  # legacy single-field fallback
         if not url:
             return
         title = "Streammirrarr ✅" if ok else "Streammirrarr ❌ FAILED"

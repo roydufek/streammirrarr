@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.2.1 — 2026-06-30T19:40:00Z
+- Gotify config split into separate **server URL** + **app token** fields
+  (clearer for general users); the message URL is assembled internally. The old
+  single `gotify_url` still works as a fallback.
+
 ## v0.2.0 — 2026-06-30T19:30:00Z
 Hardening pass for unattended daily operation:
 - **Cross-process file lock** guards every run (manual + scheduled) across all
