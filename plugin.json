@@ -1,0 +1,44 @@
+{
+  "name": "Streammirrarr",
+  "version": "0.1.0",
+  "description": "Exact-match stream consolidation. Attaches duplicate streams from failover M3U accounts onto the channels created by your source-of-truth account, matching by exact name + provider stream_id. No fuzzy matching — runs in seconds, safe to run daily.",
+  "author": "Roy Dufek",
+  "license": "MIT",
+  "min_dispatcharr_version": "v0.20.0",
+  "fields": [],
+  "actions": [
+    {
+      "id": "preview",
+      "label": "🔍 Preview (dry-run)",
+      "description": "Compute exactly what would change and report it. Writes nothing.",
+      "button_label": "Preview",
+      "button_variant": "outline"
+    },
+    {
+      "id": "run",
+      "label": "▶️ Run exact match now",
+      "description": "Reconcile failover streams onto channels.",
+      "button_label": "Run now",
+      "button_variant": "filled",
+      "confirm": {
+        "required": true,
+        "title": "Run exact-match reconcile?",
+        "message": "Rebuilds failover streams on matched channels: attaches exact stream_id matches and removes mismatched managed streams. Proceed?"
+      }
+    },
+    {
+      "id": "view_last",
+      "label": "📄 View last results",
+      "description": "Show the report from the most recent run.",
+      "button_label": "View",
+      "button_variant": "subtle"
+    },
+    {
+      "id": "clear_lock",
+      "label": "🧹 Clear operation lock",
+      "description": "Force-clear a stuck run lock if a previous run was interrupted.",
+      "button_label": "Clear lock",
+      "button_variant": "subtle"
+    }
+  ]
+}
