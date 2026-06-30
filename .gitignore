@@ -4,3 +4,4 @@ __pycache__/
 *.pyc
 last_run.json
 .sched/
+backup_channelstream_*.json
