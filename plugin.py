@@ -58,7 +58,7 @@ except Exception:  # pragma: no cover - defensive: never block on websocket impo
     def send_websocket_update(*_a, **_k):
         return None
 
-__version__ = "0.2.1"
+__version__ = "0.2.2"
 
 logger = logging.getLogger("plugins.streammirrarr")
 

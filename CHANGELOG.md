@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.2.2 — 2026-06-30T22:00:00Z
+- Release manifests (`manifest.json`, `plugin-manifest.json`) are now
+  GPG-signed in CI, so Dispatcharr can verify them (the "verified" badge). The
+  signing step is optional/guarded — skipped cleanly if no key is configured.
+
 ## v0.2.1 — 2026-06-30T19:40:00Z
 - Gotify config split into separate **server URL** + **app token** fields
   (clearer for general users); the message URL is assembled internally. The old

@@ -66,6 +66,30 @@ jobs:
                 + (.manifest.versions | map(select(.version != $v))))
           ' plugin-manifest.json > pm.tmp && mv pm.tmp plugin-manifest.json
 
+      - name: Sign manifests (GPG, optional)
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+        run: |
+          if [ -z "${GPG_PRIVATE_KEY:-}" ]; then
+            echo "No GPG_PRIVATE_KEY secret set — publishing unsigned."
+            exit 0
+          fi
+          echo "$GPG_PRIVATE_KEY" | gpg --batch --import
+          KEYID=$(gpg --list-secret-keys --with-colons | awk -F: '/^sec/{print $5; exit}')
+          sign() {
+            f="$1"
+            # Canonical bytes = exactly what Dispatcharr recomputes to verify:
+            #   json.dumps(manifest_obj, separators=(",",":")) + "\n"
+            python3 -c "import json,sys; m=json.load(open('$f'))['manifest']; sys.stdout.buffer.write((json.dumps(m,separators=(',',':'))+chr(10)).encode())" > canon.bin
+            gpg --batch --yes --pinentry-mode loopback --armor --detach-sign \
+                --local-user "$KEYID" -o sig.asc canon.bin
+            jq --arg sig "$(cat sig.asc)" '.signature = $sig' "$f" > t.json && mv t.json "$f"
+            rm -f canon.bin sig.asc
+          }
+          sign manifest.json
+          sign plugin-manifest.json
+          echo "Signed manifest.json and plugin-manifest.json with key $KEYID"
+
       - name: Commit refreshed manifests
         run: |
           git config user.name "github-actions[bot]"
