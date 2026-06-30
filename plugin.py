@@ -50,7 +50,7 @@ except Exception:  # pragma: no cover - defensive: never block on websocket impo
     def send_websocket_update(*_a, **_k):
         return None
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"
 
 logger = logging.getLogger("plugins.streammirrarr")
 
@@ -139,11 +139,12 @@ class Plugin:
     ]
 
     def __init__(self):
-        # Kick the scheduler on load; it no-ops unless a schedule_time is set.
+        # Kick the scheduler on load; it idles unless a schedule_time is set.
         try:
             self._ensure_scheduler()
         except Exception:
             logger.debug("scheduler start deferred", exc_info=True)
+        logger.info("[Streammirrarr] v%s initialized", __version__)
 
     # ------------------------------------------------------------------ fields
     @property
@@ -630,6 +631,7 @@ class Plugin:
         t = threading.Thread(target=self._scheduler_loop, name="streammirrarr-sched", daemon=True)
         Plugin._sched_thread = t
         t.start()
+        logger.info("[Streammirrarr] scheduler thread active (checks schedule_time every 30s)")
 
     def _scheduler_loop(self):
         os.makedirs(SCHED_DIR, exist_ok=True)

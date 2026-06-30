@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.1.1 — 2026-06-30T19:10:00Z
+- Log on plugin init and scheduler-thread start (observability for the unattended
+  daily run, parity with other Dispatcharr plugins).
+
 ## v0.1.0 — 2026-06-30T18:55:00Z
 Initial build. Exact-match stream consolidation plugin for Dispatcharr:
 - Anchors each channel to its source-of-truth account stream by exact name,
