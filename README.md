@@ -26,8 +26,23 @@ lookup — it runs in **seconds**, not hours, and is safe to run daily.
 
 ## Install
 
-Copy this folder to `…/dispatcharr/data/plugins/streammirrarr/`, then in
-Dispatcharr go to **Plugins → reload**, enable Streammirrarr, and configure:
+**Via plugin repo (recommended):** In Dispatcharr go to **Plugins → Repos → Add
+repo** and paste:
+
+```
+https://raw.githubusercontent.com/roydufek/streammirrarr/main/manifest.json
+```
+
+Then find Streammirrarr in the available plugins and click install. Updates show
+up automatically when a new version is published.
+
+**Manual zip upload:** Download a release zip (or run `bash build.sh`) and use
+**Plugins → Import** to upload it.
+
+**Manual copy:** Copy this folder to `…/dispatcharr/data/plugins/streammirrarr/`,
+then **Plugins → reload**.
+
+After installing, enable Streammirrarr and configure:
 
 - **Primary (source-of-truth) account** — auto-detected from `auto_created_by`;
   the account whose auto-sync owns your channel list.
@@ -49,3 +64,14 @@ Dispatcharr go to **Plugins → reload**, enable Streammirrarr, and configure:
 
 - The container runs in UTC; the schedule time is UTC.
 - No external dependencies (pure stdlib + Django ORM).
+
+## Publishing a new version
+
+1. Bump `__version__` in `plugin.py` and `version` in `plugin.json`, add a
+   `CHANGELOG.md` entry, commit.
+2. `git push github main` then `git tag vX.Y.Z && git push github vX.Y.Z`.
+3. The `release` workflow builds `streammirrarr-X.Y.Z.zip`, computes its sha256,
+   refreshes `manifest.json` + `plugin-manifest.json`, and creates the GitHub
+   Release. Dispatcharr instances see the update on their next repo refresh.
+
+The tag (`vX.Y.Z`) must match the version in `plugin.json`, or the workflow fails.
