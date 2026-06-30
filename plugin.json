@@ -1,6 +1,6 @@
 {
   "name": "Streammirrarr",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "Exact-match stream consolidation. Attaches duplicate streams from failover M3U accounts onto the channels created by your source-of-truth account, matching by exact name + provider stream_id. No fuzzy matching — runs in seconds, safe to run daily.",
   "author": "Roy Dufek",
   "license": "MIT",
@@ -23,7 +23,7 @@
       "confirm": {
         "required": true,
         "title": "Run exact-match reconcile?",
-        "message": "Rebuilds failover streams on matched channels: attaches exact stream_id matches and removes mismatched managed streams. Proceed?"
+        "message": "Rebuilds failover streams on matched channels: attaches exact stream_id matches and removes mismatched managed streams. A backup is taken first. Proceed?"
       }
     },
     {
