@@ -57,6 +57,27 @@ https://raw.githubusercontent.com/roydufek/streammirrarr/main/manifest.json
 Then find Streammirrarr in the available plugins and click install. Updates show
 up automatically when a new version is published.
 
+The release manifests are **GPG-signed**. To get the ✓ *Verified Signature* badge
+in Dispatcharr, paste the public key below into the repo's **public key** field
+when you add it. This is optional — installs work fine unsigned.
+
+<details>
+<summary><strong>Streammirrarr signing public key</strong></summary>
+
+```
+-----BEGIN PGP PUBLIC KEY BLOCK-----
+
+mDMEakQ9dBYJKwYBBAHaRw8BAQdAIN9yJVIVdRBTaK46dRxxG4c5msWaLj3YQAZ5
+GvrRugu0NlN0cmVhbW1pcnJhcnIgU2lnbmluZyBLZXkgPHN0cmVhbW1pcnJhcnJA
+cm95ZHVmZWsuY29tPoiQBBMWCgA4FiEEk8v/fVXKxsHrBgOTi/sfbHb4rvsFAmpE
+PXQCGwMFCwkIBwIGFQoJCAsCBBYCAwECHgECF4AACgkQi/sfbHb4rvujqgEAyf/p
+ZTFrxkoIBRQn5ZruFy15s9jLBIPVJe8GvwrNuGUA/20+n1Q+fOvJDQESkKFflFuW
+nvyxQGY7n6uP73XfH48E
+=IBjX
+-----END PGP PUBLIC KEY BLOCK-----
+```
+</details>
+
 **Manual zip upload:** Download a release zip (or run `bash build.sh`) and use
 **Plugins → Import** to upload it.
 
