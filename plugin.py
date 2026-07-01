@@ -58,7 +58,7 @@ except Exception:  # pragma: no cover - defensive: never block on websocket impo
     def send_websocket_update(*_a, **_k):
         return None
 
-__version__ = "0.2.2"
+__version__ = "0.2.3"
 
 logger = logging.getLogger("plugins.streammirrarr")
 
@@ -653,7 +653,25 @@ class Plugin:
         elif scope == "profile":
             pname = (settings.get("channel_profile") or "").strip()
             if not pname:
-                raise ValueError("Channel scope is 'profile' but no profile is selected.")
+                # The saved value can arrive blank (dynamically-populated selects
+                # sometimes serialize to empty). If exactly one profile exists it's
+                # unambiguous — use it rather than failing the (scheduled) run.
+                prof_names = list(
+                    ChannelProfile.objects.order_by("name").values_list("name", flat=True)
+                )
+                if len(prof_names) == 1:
+                    pname = prof_names[0]
+                    logger.warning(
+                        "[Streammirrarr] 'profile' scope with no profile selected; "
+                        "using the only profile present: %r",
+                        pname,
+                    )
+                else:
+                    raise ValueError(
+                        "Channel scope is 'profile' but no profile is selected. "
+                        f"Available profiles: {', '.join(prof_names) or '(none)'}. "
+                        "Pick one in settings, or set scope to 'All channels'."
+                    )
             ch_ids = ChannelProfileMembership.objects.filter(
                 channel_profile__name=pname, enabled=True
             ).values_list("channel_id", flat=True)

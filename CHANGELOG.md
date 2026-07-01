@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.2.3 — 2026-07-01T16:00:00Z
+- Fix: `profile` channel-scope no longer fails the run when the saved profile
+  value arrives blank (a select-serialization quirk). If exactly one channel
+  profile exists it's used automatically; otherwise a clear error names the
+  available profiles. Fixes daily scheduled-run failures with
+  `ValueError: Channel scope is 'profile' but no profile is selected`.
+
 ## v0.2.2 — 2026-06-30T22:00:00Z
 - Release manifests (`manifest.json`, `plugin-manifest.json`) are now
   GPG-signed in CI, so Dispatcharr can verify them (the "verified" badge). The

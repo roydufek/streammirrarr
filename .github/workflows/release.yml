@@ -35,6 +35,9 @@ jobs:
             exit 1
           fi
 
+      - name: Syntax check plugin.py
+        run: python3 -m py_compile plugin.py
+
       - name: Build install zip
         id: build
         run: |
