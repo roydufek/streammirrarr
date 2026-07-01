@@ -1,6 +1,25 @@
-# Streammirrarr
+<p align="center">
+  <img src="logo.png" alt="Streammirrarr" width="96" height="96" />
+</p>
 
-Exact-match stream consolidation for [Dispatcharr](https://github.com/Dispatcharr/Dispatcharr).
+<h1 align="center">Streammirrarr</h1>
+
+<p align="center">
+  <strong>Exact-match stream consolidation plugin for Dispatcharr.</strong>
+</p>
+
+<p align="center">
+  <a href="#what-it-does">What it does</a> · <a href="#install">Install</a> · <a href="#settings">Settings</a> · <a href="#actions">Actions</a> · <a href="#publishing-a-new-version">Publishing</a>
+</p>
+
+<p align="center">
+  <img alt="License" src="https://img.shields.io/badge/license-MIT-blue" />
+  <img alt="Python" src="https://img.shields.io/badge/python-3-3776AB?logo=python&logoColor=white" />
+  <img alt="Dispatcharr" src="https://img.shields.io/badge/dispatcharr-plugin-1d9bf0?logo=plex&logoColor=white" />
+  <img alt="Manifest" src="https://img.shields.io/badge/manifest-GPG--signed-brightgreen" />
+</p>
+
+---
 
 ## What it does
 
@@ -43,6 +62,8 @@ up automatically when a new version is published.
 
 **Manual copy:** Copy this folder to `…/dispatcharr/data/plugins/streammirrarr/`,
 then **Plugins → reload**.
+
+## Settings
 
 After installing, enable Streammirrarr and configure:
 
