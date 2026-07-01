@@ -58,7 +58,7 @@ except Exception:  # pragma: no cover - defensive: never block on websocket impo
     def send_websocket_update(*_a, **_k):
         return None
 
-__version__ = "0.2.3"
+__version__ = "0.2.4"
 
 logger = logging.getLogger("plugins.streammirrarr")
 
@@ -939,14 +939,17 @@ class Plugin:
 
     def _scheduled_settings(self):
         from apps.plugins.models import PluginConfig
-        from apps.plugins.loader import PluginManager
         cfg = PluginConfig.objects.filter(key=PLUGIN_KEY).values("settings").first()
         saved = (cfg or {}).get("settings", {}) or {}
         # Merge field defaults so a never-saved setting still has its default.
         try:
             defaults = {f["id"]: f.get("default") for f in self.fields}
             merged = dict(defaults)
-            merged.update(saved)
+            # Only override with non-None saved values. The Dispatcharr UI can
+            # persist a field as null (e.g. a select left at its placeholder), and
+            # a null must NOT clobber the field's default — that's what actually
+            # broke the scheduled run (channel_profile came through as null).
+            merged.update({k: v for k, v in saved.items() if v is not None})
             return merged
         except Exception:
             return saved

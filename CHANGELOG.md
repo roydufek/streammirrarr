@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.2.4 — 2026-07-01T17:30:00Z
+- Fix the actual root cause behind the v0.2.3 crash: the Dispatcharr UI saved
+  `channel_profile` as JSON `null`, and the scheduled-settings merge let that
+  null clobber the field's default. Now non-None saved values override defaults;
+  a null falls back to the default. (v0.2.3's single-profile fallback stays as a
+  second line of defense.)
+
 ## v0.2.3 — 2026-07-01T16:00:00Z
 - Fix: `profile` channel-scope no longer fails the run when the saved profile
   value arrives blank (a select-serialization quirk). If exactly one channel
