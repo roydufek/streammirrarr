@@ -10,19 +10,21 @@ channel list and the others are pure duplicates. Streammirrarr attaches those
 duplicate streams onto the existing channels as **failover** streams, so
 Dispatcharr can fail over between accounts when a connection is in use.
 
-It does this by **exact matching**, not fuzzy matching:
+It does this by **exact matching** on provider `stream_id`, not fuzzy matching:
 
-- The channel's identity is its **name**.
-- For each channel it finds the **primary** account's stream whose name exactly
-  matches → that stream's provider `stream_id` is the channel's key.
-- It fans that `stream_id` out to each **failover** account to find the twin
-  stream, attaching them as failover (order 1, 2, …) with the primary at order 0.
-- Mismatched streams from managed accounts are removed (cleans up prior fuzzy
-  over-matching). Streams from other accounts are never touched. A zero-match
-  never wipes a channel.
+- Each channel is anchored on the **primary-account stream already attached to
+  it** (the one auto-sync created the channel from) — never on the channel name.
+- It reads that stream's provider `stream_id` and fans it out to each **failover**
+  account to find the twin stream, attaching them as failover (order 1, 2, …) with
+  the primary at order 0.
+- Other managed streams that aren't a match are removed. Streams from non-managed
+  accounts are never touched. A channel with no primary stream is skipped (never
+  wiped).
 
-Because every account is the same provider feed, matching is a dictionary
-lookup — it runs in **seconds**, not hours, and is safe to run daily.
+Anchoring on `stream_id` (not name) keeps every channel mapped to its own distinct
+stream, so duplicate-named channels never collapse onto a shared stream and the
+auto-sync can still prune stale channels. Matching is a dictionary lookup — it runs
+in **seconds**, not hours, and is safe to run daily.
 
 ## Install
 

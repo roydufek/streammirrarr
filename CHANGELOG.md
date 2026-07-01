@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.3.0 — 2026-07-01T18:30:00Z
+- Matching now anchors each channel on **its own attached primary-account stream
+  (by `stream_id`)** instead of by channel name. Name matching collapsed
+  duplicate-named channels onto one shared stream, creating redundant "zombie"
+  channels and blocking Dispatcharr's auto-sync from pruning stale ones (channel
+  count drifted above the stream count). stream_id anchoring keeps every channel
+  mapped to its own distinct stream; the plugin now only ever *adds* failovers and
+  never reassigns the primary. Removes the fuzzy/name code entirely.
+- To reset an instance already affected by the old behavior: delete all channels,
+  re-sync the source account, then run this plugin.
+
 ## v0.2.4 — 2026-07-01T17:30:00Z
 - Fix the actual root cause behind the v0.2.3 crash: the Dispatcharr UI saved
   `channel_profile` as JSON `null`, and the scheduled-settings merge let that

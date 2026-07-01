@@ -12,21 +12,24 @@ Stream-Mapparr does this with fuzzy name matching, which is O(channels x streams
 edit-distance scoring — ~6 hours for ~11k streams, and it both over-matches
 (wrong streams attached) and under-matches.
 
-Because every account is the *same* provider feed, the duplicates are identical:
-same stream name, same provider ``stream_id``. So matching collapses to a plain
-dictionary lookup and runs in seconds.
+Because every account is the *same* provider feed, the duplicates share the same
+provider ``stream_id``. So matching is a plain dictionary lookup and runs in seconds.
 
 How it matches
 --------------
-* The channel's identity is its **name** (the only stable channel attribute).
-* For each channel we find the **primary** account stream whose name exactly
-  equals the channel name -> that stream's ``stream_id`` is the channel's key.
-* We fan out that ``stream_id`` to each **failover** account to find the twin
-  stream, and attach them as failover (order 1, 2, ...) with the primary at
-  order 0.
-* Anything else from a managed account that isn't an exact match is removed
-  (cleans up prior fuzzy mistakes). Streams from non-managed accounts are left
-  untouched. A zero-match never wipes a channel.
+* Each channel is anchored on the **primary-account stream already attached to
+  it** (the one the auto-sync created it from). We read that stream's provider
+  ``stream_id`` — never the channel name.
+* We fan that ``stream_id`` out to each **failover** account to find the twin
+  stream, and attach them as failover (order 1, 2, ...) with the primary at order 0.
+* Any other managed stream on the channel that isn't a match is removed. Streams
+  from non-managed accounts are left untouched. A channel with no primary stream
+  is skipped (never wiped).
+
+Anchoring on stream_id (not name) is deliberate: name matching collapsed
+duplicate-named channels onto one shared stream, which created redundant channels
+and blocked the auto-sync from pruning stale ones. stream_id keeps every channel
+mapped to its own distinct stream.
 
 No external dependencies — pure stdlib + Django ORM.
 """
@@ -58,7 +61,7 @@ except Exception:  # pragma: no cover - defensive: never block on websocket impo
     def send_websocket_update(*_a, **_k):
         return None
 
-__version__ = "0.2.4"
+__version__ = "0.3.0"
 
 logger = logging.getLogger("plugins.streammirrarr")
 
@@ -76,17 +79,6 @@ SCHED_WINDOW_SECS = 6 * 3600  # keep retrying for this long after the target tim
 SCHED_COOLDOWN_SECS = 15 * 60  # minimum gap between scheduled attempts
 LOCK_STALE_SECS = 30 * 60     # a run lock older than this (dead holder) is stolen
 BACKUP_KEEP = 7               # rotating pre-run backups to retain
-
-
-def _norm(name):
-    """Normalize a stream/channel name for exact comparison.
-
-    Collapses runs of whitespace and casefolds. Deliberately *not* fuzzy — same
-    provider feed means names are byte-identical apart from trivial whitespace.
-    """
-    if not name:
-        return ""
-    return " ".join(str(name).split()).casefold()
 
 
 def _now():
@@ -117,10 +109,10 @@ class Plugin:
     name = "Streammirrarr"
     version = __version__
     description = (
-        "Exact-match stream consolidation. Attaches duplicate streams from "
-        "failover M3U accounts onto the channels created by your source-of-truth "
-        "account, matching by exact name + provider stream_id. No fuzzy matching "
-        "— runs in seconds, safe to run daily."
+        "Exact-match stream consolidation. Attaches failover-account streams onto "
+        "the channels created by your source-of-truth account, matched by provider "
+        "stream_id (each channel anchored on its own primary stream). No fuzzy "
+        "matching — runs in seconds, safe to run daily."
     )
     author = "Roy Dufek"
 
@@ -213,8 +205,8 @@ class Plugin:
                 "options": acct_options,
                 "default": primary_default,
                 "help_text": (
-                    "The account whose auto-sync owns the channel list. Channels "
-                    "anchor to this account's streams by exact name."
+                    "The account whose auto-sync owns the channel list. Each channel "
+                    "anchors on this account's stream that's already attached to it."
                 ),
             },
             {
@@ -467,7 +459,8 @@ class Plugin:
             "message": "Building lookup maps…",
         })
 
-        primary_by_name, fo_by_sid, fo_by_name = self._build_maps(primary, failovers, skip_stale)
+        managed_info, fo_by_sid = self._build_maps(primary, failovers, managed_ids, skip_stale)
+        primary_id = primary.id
 
         cs_rows = ChannelStream.objects.filter(
             stream__m3u_account_id__in=managed_ids
@@ -499,26 +492,35 @@ class Plugin:
             if self._cancel.is_set():
                 return self._finish_cancelled(dry_run, started, stats)
 
-            key = _norm(ch["name"])
-            p = primary_by_name.get(key)
-            if not p:
+            rows = sorted(current.get(ch["id"], []))  # (order, stream_pk, cs_id)
+            existing = {stream_pk: (order, cs_id) for order, stream_pk, cs_id in rows}
+
+            # Anchor on the channel's OWN attached primary-account stream (never
+            # by name — that collapsed duplicate-named channels onto one stream).
+            # If more than one primary stream is attached (legacy mess), take the
+            # lowest stream_id deterministically.
+            primary_candidates = []
+            for _o, pk, _c in rows:
+                info = managed_info.get(pk)
+                if info and info[0] == primary_id:
+                    primary_candidates.append(((info[1] if info[1] is not None else 1 << 62), pk))
+            if not primary_candidates:
                 stats["unmatched"] += 1
                 if len(unmatched_examples) < 25:
                     unmatched_examples.append(ch["name"])
                 continue
             stats["matched"] += 1
 
-            primary_pk, sid = p
+            primary_candidates.sort()
+            primary_pk = primary_candidates[0][1]
+            anchor_sid = managed_info[primary_pk][1]
             desired = [primary_pk]
-            for i, _f in enumerate(failovers):
-                fo = fo_by_sid[i].get(sid) if sid else None
-                if fo is None:
-                    fo = fo_by_name[i].get(key)
-                if fo is not None and fo not in desired:
-                    desired.append(fo)
+            if anchor_sid is not None:
+                for i, _f in enumerate(failovers):
+                    fo = fo_by_sid[i].get(anchor_sid)
+                    if fo is not None and fo not in desired:
+                        desired.append(fo)
 
-            rows = sorted(current.get(ch["id"], []))  # (order, stream_pk, cs_id)
-            existing = {stream_pk: (order, cs_id) for order, stream_pk, cs_id in rows}
             desired_set = set(desired)
 
             # Decide the final ordered set of managed streams for this channel.
@@ -681,36 +683,35 @@ class Plugin:
         return qs
 
     # ----------------------------------------------------------- map building
-    def _build_maps(self, primary, failovers, skip_stale):
-        def base_qs(account):
-            qs = Stream.objects.filter(m3u_account=account)
-            if skip_stale:
-                qs = qs.exclude(is_stale=True)
-            return qs.values_list("id", "name", "stream_id")
+    def _build_maps(self, primary, failovers, managed_ids, skip_stale):
+        """Return (managed_info, fo_by_sid).
 
-        primary_by_name = {}
-        for pk, name, sid in base_qs(primary).iterator():
-            key = _norm(name)
-            if not key:
-                continue
-            cur = primary_by_name.get(key)
-            if cur is None or (sid is not None and (cur[1] is None or sid < cur[1])):
-                primary_by_name[key] = (pk, sid)
+        managed_info: stream_pk -> (m3u_account_id, stream_id) for every stream in
+        a managed account. Used to identify the primary stream already attached to
+        a channel and read its provider stream_id (the anchor).
+
+        fo_by_sid: per failover account, stream_id -> stream_pk (stale excluded when
+        skip_stale). Used to fan the anchor stream_id out to the failover accounts.
+        """
+        managed_info = {}
+        for pk, acct, sid in (
+            Stream.objects.filter(m3u_account_id__in=managed_ids)
+            .values_list("id", "m3u_account_id", "stream_id")
+            .iterator()
+        ):
+            managed_info[pk] = (acct, sid)
 
         fo_by_sid = []
-        fo_by_name = []
         for f in failovers:
+            qs = Stream.objects.filter(m3u_account=f)
+            if skip_stale:
+                qs = qs.exclude(is_stale=True)
             by_sid = {}
-            by_name = {}
-            for pk, name, sid in base_qs(f).iterator():
+            for pk, sid in qs.values_list("id", "stream_id").iterator():
                 if sid is not None and sid not in by_sid:
                     by_sid[sid] = pk
-                key = _norm(name)
-                if key and key not in by_name:
-                    by_name[key] = pk
             fo_by_sid.append(by_sid)
-            fo_by_name.append(by_name)
-        return primary_by_name, fo_by_sid, fo_by_name
+        return managed_info, fo_by_sid
 
     # ------------------------------------------------------------- accounts
     def _resolve_accounts(self, settings):
