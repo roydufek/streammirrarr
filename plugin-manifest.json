@@ -3,12 +3,19 @@
     "slug": "streammirrarr",
     "name": "Streammirrarr",
     "latest": {
-      "version": "0.3.0",
-      "url": "v0.3.0/streammirrarr-0.3.0.zip",
-      "sha256": "b98cb3ddafea41f51f27eb5d0939d13315f6ef24d1b0586095083eba46f89686",
-      "size": 45191
+      "version": "0.4.0",
+      "url": "v0.4.0/streammirrarr-0.4.0.zip",
+      "sha256": "7fcfa90a2186120537394e55e3b23788ff0f791d593c1879253642fbdbc81945",
+      "size": 48669
     },
     "versions": [
+      {
+        "version": "0.4.0",
+        "url": "v0.4.0/streammirrarr-0.4.0.zip",
+        "sha256": "7fcfa90a2186120537394e55e3b23788ff0f791d593c1879253642fbdbc81945",
+        "size": 48669,
+        "min_dispatcharr_version": "v0.20.0"
+      },
       {
         "version": "0.3.0",
         "url": "v0.3.0/streammirrarr-0.3.0.zip",
@@ -46,5 +53,5 @@
       }
     ]
   },
-  "signature": "-----BEGIN PGP SIGNATURE-----\n\niHUEABYKAB0WIQSTy/99VcrGwesGA5OL+x9sdviu+wUCakVbOwAKCRCL+x9sdviu\n+9TIAP9QbARmUxkNaYjVJAXij+i9LOTFp1wff4qqBRP+hw+IgQEAkF0WjHPBgmVa\nkQA3/hWpXyzzJpOPkHE5hFWiwm/TOwU=\n=BogM\n-----END PGP SIGNATURE-----"
+  "signature": "-----BEGIN PGP SIGNATURE-----\n\niHUEABYKAB0WIQSTy/99VcrGwesGA5OL+x9sdviu+wUCak/mBQAKCRCL+x9sdviu\n+4G7AQDcwkvORSGC/xN1yOABCkf181BRFJBJeA/tqip5enA1xgD/cKHb1R9OENG/\nA7BNY1s9IB5/49Lmb+vBJ9WwGSvpcww=\n=lIQ4\n-----END PGP SIGNATURE-----"
 }
