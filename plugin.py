@@ -61,7 +61,7 @@ except Exception:  # pragma: no cover - defensive: never block on websocket impo
     def send_websocket_update(*_a, **_k):
         return None
 
-__version__ = "0.4.0"
+__version__ = "0.4.1"
 
 logger = logging.getLogger("plugins.streammirrarr")
 
@@ -116,7 +116,6 @@ class Plugin:
     )
     author = "Roy Dufek"
 
-    _job_thread = None
     _cancel = threading.Event()
     _sched_thread = None
     _sched_stop = threading.Event()
@@ -366,35 +365,46 @@ class Plugin:
 
     # --------------------------------------------------------------- actions
     def _action_start(self, job_kind, dry_run, settings):
-        if self._job_thread is not None and self._job_thread.is_alive():
-            return {"status": "error", "message": "A run is already in progress."}
         if not self._acquire_lock():
             return {
                 "status": "error",
                 "message": "A run is already in progress (locked). Use 'Clear lock' if it's stuck.",
             }
         self._cancel.clear()
+        # Run synchronously and return the real result. Dispatcharr runs on
+        # uWSGI + gevent (early monkey-patch); a greenlet spawned from the request
+        # handler and left detached is NOT reliably scheduled once the response is
+        # sent, so a background thread silently never completes. These jobs take a
+        # few seconds and uWSGI http-timeout is 600s, so inline execution is safe
+        # and hands the UI the actual result immediately.
         try:
-            t = threading.Thread(
-                target=self._job_guarded,
-                args=(job_kind, dry_run, dict(settings)),
-                name="streammirrarr-job",
-                daemon=True,
-            )
-            Plugin._job_thread = t
-            t.start()
+            if job_kind == "dedup":
+                report = self._dedup_channels(dry_run, dict(settings))
+            else:
+                report = self._run_job(dry_run, dict(settings))
+            return {
+                "status": report.get("status", "ok"),
+                "message": report.get("message", "Done."),
+                "result": report,
+            }
         except Exception as exc:
-            # Thread never started -> _job_guarded's finally won't release the lock.
+            logger.exception("streammirrarr job failed")
+            err = {
+                "status": "error",
+                "dry_run": dry_run,
+                "finished": _iso(_now()),
+                "error": str(exc),
+                "message": f"Run failed: {exc}",
+            }
+            self._write_status(err)
+            send_websocket_update(
+                "updates", "update",
+                {"type": "streammirrarr", "status": "error", "message": str(exc)},
+            )
+            return err
+        finally:
+            close_old_connections()
             self._release_lock()
-            Plugin._job_thread = None
-            logger.exception("streammirrarr could not start job thread")
-            return {"status": "error", "message": f"Could not start run: {exc}"}
-        label = {"dedup": "Duplicate-channel cleanup", "reconcile": "Exact-match reconcile"}.get(job_kind, "Run")
-        mode = f"{label} (dry-run)" if dry_run else label
-        return {
-            "status": "queued",
-            "message": f"{mode} started. Watch notifications, then check ‘View last results’.",
-        }
 
     def _action_view_last(self):
         data = self._read_status()
@@ -405,7 +415,6 @@ class Plugin:
     def _action_clear_lock(self):
         existed = os.path.exists(RUN_LOCK)
         self._release_lock()
-        Plugin._job_thread = None
         self._cancel.clear()
         return {"status": "ok", "message": "Lock cleared." if existed else "No lock was held."}
 
@@ -460,30 +469,6 @@ class Plugin:
             logger.debug("could not remove run lock", exc_info=True)
 
     # --------------------------------------------------------------- job body
-    def _job_guarded(self, job_kind, dry_run, settings):
-        try:
-            if job_kind == "dedup":
-                self._dedup_channels(dry_run, settings)
-            else:
-                self._run_job(dry_run, settings)
-        except Exception as exc:
-            logger.exception("streammirrarr job failed")
-            self._write_status({
-                "status": "error",
-                "dry_run": dry_run,
-                "finished": _iso(_now()),
-                "error": str(exc),
-                "message": f"Run failed: {exc}",
-            })
-            send_websocket_update(
-                "updates", "update",
-                {"type": "streammirrarr", "status": "error", "message": str(exc)},
-            )
-        finally:
-            close_old_connections()
-            self._release_lock()
-            Plugin._job_thread = None
-
     def _run_job(self, dry_run, settings):
         started = _now()
         primary, failovers, managed_ids = self._resolve_accounts(settings)
@@ -1101,8 +1086,7 @@ class Plugin:
             return
         self._write_attempt(time.time())
 
-        if self._job_thread is not None and self._job_thread.is_alive():
-            return
+        # A manual run holds the same lock, so this also yields to one in progress.
         if not self._acquire_lock():
             return
         self._cancel.clear()

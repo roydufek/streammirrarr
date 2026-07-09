@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.4.1 — 2026-07-09T18:45:00Z
+- Fix: manual actions (Preview/Run/dedup) now run **synchronously** and return the
+  real result, instead of spawning a background thread. On Dispatcharr's
+  uWSGI+gevent server a greenlet spawned from the request handler and left
+  detached isn't reliably scheduled after the response is sent, so the job never
+  ran (no status written, nothing changed). Jobs take seconds and uWSGI
+  http-timeout is 600s, so inline execution is safe. The daily scheduler
+  (a long-lived greenlet) was unaffected and still works.
+
 ## v0.4.0 — 2026-07-02T00:00:00Z
 - **Duplicate-channel cleanup.** Dispatcharr's auto-sync creates duplicate
   channels when a provider's 24/7/event feeds rotate their stream_id (several
