@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-07-09T18:33:43Z",
+  "generated_at": "2026-07-09T19:28:55Z",
   "manifest": {
     "registry_name": "roydufek/streammirrarr",
     "registry_url": "https://github.com/roydufek/streammirrarr",
@@ -14,13 +14,13 @@
         "license": "MIT",
         "manifest_url": "https://raw.githubusercontent.com/roydufek/streammirrarr/main/plugin-manifest.json",
         "icon_url": "https://raw.githubusercontent.com/roydufek/streammirrarr/main/logo.png",
-        "latest_version": "0.4.1",
-        "latest_sha256": "90aad696598e803eb89825fc7a16f1adf122535b46cd1b7df055515a18fc40db",
-        "latest_url": "v0.4.1/streammirrarr-0.4.1.zip",
-        "latest_size": 48964,
+        "latest_version": "0.4.2",
+        "latest_sha256": "90d19f8a46cc59f759d09bf6d6467ec24d32805d071ef84a545a2f0a90486767",
+        "latest_url": "v0.4.2/streammirrarr-0.4.2.zip",
+        "latest_size": 49554,
         "min_dispatcharr_version": "v0.20.0"
       }
     ]
   },
-  "signature": "-----BEGIN PGP SIGNATURE-----\n\niHUEABYKAB0WIQSTy/99VcrGwesGA5OL+x9sdviu+wUCak/phwAKCRCL+x9sdviu\n+549AQDzVcHyf4nlG3s3JFiJ8NaMbT3D4HpriQ3TzN2DhixZkwEA3EzbyxWGHaUK\n2piJGGY7UShalQmi2Fs4CzwW7cN7ggs=\n=irw5\n-----END PGP SIGNATURE-----"
+  "signature": "-----BEGIN PGP SIGNATURE-----\n\niHUEABYKAB0WIQSTy/99VcrGwesGA5OL+x9sdviu+wUCak/2dwAKCRCL+x9sdviu\n+6LuAP93QwuEB0C9n05cloIFqCrCD1Vormlq2WfLYG1fOqz+KQD/ZDFCHxC9GDMG\nd79EMFYK+tX7uiIoul5aMKc50TlwPg4=\n=MjSV\n-----END PGP SIGNATURE-----"
 }
