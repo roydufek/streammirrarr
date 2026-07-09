@@ -61,7 +61,7 @@ except Exception:  # pragma: no cover - defensive: never block on websocket impo
     def send_websocket_update(*_a, **_k):
         return None
 
-__version__ = "0.4.3"
+__version__ = "0.4.4"
 
 logger = logging.getLogger("plugins.streammirrarr")
 
@@ -71,7 +71,17 @@ STATUS_FILE = os.path.join(PLUGIN_DIR, "last_run.json")
 SCHED_DIR = os.path.join(PLUGIN_DIR, ".sched")
 RUN_LOCK = os.path.join(SCHED_DIR, "run.lock")
 ATTEMPT_FILE = os.path.join(SCHED_DIR, "attempt.ts")
-BACKUP_GLOB = os.path.join(PLUGIN_DIR, "backup_channelstream_*.json")
+
+# Backups live OUTSIDE the plugin folder so they survive plugin updates (the
+# repo-managed install atomic-swaps the plugin folder, wiping anything inside it).
+# The plugins dir's parent is Dispatcharr's persistent, bind-mounted /data in a
+# standard install. Falls back to the plugin dir if that isn't writable.
+BACKUP_DIR = os.path.join(os.path.dirname(os.path.dirname(PLUGIN_DIR)), "streammirrarr-backups")
+try:
+    os.makedirs(BACKUP_DIR, exist_ok=True)
+except Exception:
+    BACKUP_DIR = PLUGIN_DIR
+BACKUP_GLOB = os.path.join(BACKUP_DIR, "backup_channelstream_*.json")
 
 # Scheduler tuning.
 SCHED_TICK_SECS = 30          # how often the scheduler thread wakes
@@ -803,11 +813,11 @@ class Plugin:
             ):
                 ch["streams"] = sorted(streams.get(ch["id"], []))
                 data.append(ch)
-            ts = _now().strftime("%Y%m%d-%H%M%S")
-            path = os.path.join(PLUGIN_DIR, f"backup_deleted_channels_{ts}.json")
+            ts = _now().strftime("%Y%m%d-%H%M%S-%f")  # microseconds -> unique filename
+            path = os.path.join(BACKUP_DIR, f"backup_deleted_channels_{ts}.json")
             with open(path, "w", encoding="utf-8") as fh:
                 json.dump(data, fh)
-            existing = sorted(glob.glob(os.path.join(PLUGIN_DIR, "backup_deleted_channels_*.json")))
+            existing = sorted(glob.glob(os.path.join(BACKUP_DIR, "backup_deleted_channels_*.json")))
             for old in existing[:-BACKUP_KEEP]:
                 try:
                     os.remove(old)
@@ -963,8 +973,8 @@ class Plugin:
                 ChannelStream.objects.filter(stream__m3u_account_id__in=managed_ids)
                 .values_list("channel_id", "stream_id", "order")
             )
-            ts = _now().strftime("%Y%m%d-%H%M%S")
-            path = os.path.join(PLUGIN_DIR, f"backup_channelstream_{ts}.json")
+            ts = _now().strftime("%Y%m%d-%H%M%S-%f")  # microseconds -> unique filename
+            path = os.path.join(BACKUP_DIR, f"backup_channelstream_{ts}.json")
             with open(path, "w", encoding="utf-8") as fh:
                 json.dump(rows, fh)
             existing = sorted(glob.glob(BACKUP_GLOB))

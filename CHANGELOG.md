@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.4.4 — 2026-07-09T20:20:00Z
+- Backups (`backup_channelstream_*.json`, `backup_deleted_channels_*.json`) now
+  write to a persistent **`streammirrarr-backups/`** dir beside the plugins folder
+  (Dispatcharr's bind-mounted `/data`) instead of inside the plugin folder — so they
+  **survive plugin updates** (the repo-managed install atomic-swaps the plugin folder
+  and was wiping them). Still rotate, keeping the last 7. Falls back to the plugin
+  dir if that location isn't writable.
+
 ## v0.4.3 — 2026-07-09T20:00:00Z
 - Fold channel-profile selection into the **"Which channels to process"** dropdown
   (options now include `Profile: <name>` per profile) and remove the separate
