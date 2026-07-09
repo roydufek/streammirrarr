@@ -101,8 +101,21 @@ After installing, enable Streammirrarr and configure:
 
 - **Preview (dry-run)** — reports exactly what would change, writes nothing.
 - **Run exact match now** — performs the reconcile.
+- **Preview duplicate cleanup** — reports duplicate channels, deletes nothing.
+- **Remove duplicate channels** — deletes channels that share a primary stream
+  with another (keeps one per stream). See below.
 - **View last results** — the report from the most recent run.
 - **Clear operation lock** — recover from an interrupted run.
+
+### Duplicate channels
+
+Dispatcharr's auto-sync can create duplicate channels when a provider's
+24/7/event feeds rotate their `stream_id` — several channels end up sharing the
+same primary stream. **Remove duplicate channels** keeps one channel per shared
+stream (EPG-bound first, then lowest id) and deletes the rest; it only touches
+true duplicates (same `stream_id`), so legitimately distinct feeds with the same
+name are left alone. A backup is written first. Enable **"Also remove duplicate
+channels after the daily run"** in settings to keep them from accumulating.
 
 ## Notes
 

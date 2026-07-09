@@ -1,5 +1,18 @@
 # Changelog
 
+## v0.4.0 — 2026-07-02T00:00:00Z
+- **Duplicate-channel cleanup.** Dispatcharr's auto-sync creates duplicate
+  channels when a provider's 24/7/event feeds rotate their stream_id (several
+  channels end up sharing the same primary stream). New:
+  - **Preview duplicate cleanup** action — reports duplicates, deletes nothing.
+  - **Remove duplicate channels** action (confirm-required) — for each primary
+    stream on >1 channel, keeps one (EPG-bound, else lowest id) and deletes the
+    rest. Only touches true duplicates (same stream_id); distinct feeds with the
+    same name are left alone. A backup of deleted channels is written first
+    (`backup_deleted_channels_*.json`, last 7 kept).
+  - **"Also remove duplicate channels after the daily run"** setting (off by
+    default) to keep them from accumulating.
+
 ## v0.3.0 — 2026-07-01T18:30:00Z
 - Matching now anchors each channel on **its own attached primary-account stream
   (by `stream_id`)** instead of by channel name. Name matching collapsed

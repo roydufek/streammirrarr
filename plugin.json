@@ -1,6 +1,6 @@
 {
   "name": "Streammirrarr",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Exact-match stream consolidation. Attaches failover-account streams onto the channels created by your source-of-truth account, matched by provider stream_id (each channel anchored on its own primary stream). No fuzzy matching — runs in seconds, safe to run daily.",
   "author": "Roy Dufek",
   "license": "MIT",
@@ -24,6 +24,26 @@
         "required": true,
         "title": "Run exact-match reconcile?",
         "message": "Rebuilds failover streams on matched channels: attaches exact stream_id matches and removes mismatched managed streams. A backup is taken first. Proceed?"
+      }
+    },
+    {
+      "id": "dedup_preview",
+      "label": "🔍 Preview duplicate cleanup",
+      "description": "Report duplicate channels (that share a primary stream) without deleting anything.",
+      "button_label": "Preview dedup",
+      "button_variant": "outline"
+    },
+    {
+      "id": "dedup_run",
+      "label": "🗑️ Remove duplicate channels",
+      "description": "Delete channels that share a primary stream with another (keeps one per stream).",
+      "button_label": "Remove dupes",
+      "button_variant": "filled",
+      "button_color": "red",
+      "confirm": {
+        "required": true,
+        "title": "Delete duplicate channels?",
+        "message": "For each primary stream attached to more than one channel, this keeps one channel (EPG-bound, else lowest id) and DELETES the rest. A backup is taken first. This removes channels — proceed?"
       }
     },
     {

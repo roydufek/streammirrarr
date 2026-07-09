@@ -5,4 +5,5 @@ __pycache__/
 last_run.json
 .sched/
 backup_channelstream_*.json
+backup_deleted_channels_*.json
 dist/

@@ -61,7 +61,7 @@ except Exception:  # pragma: no cover - defensive: never block on websocket impo
     def send_websocket_update(*_a, **_k):
         return None
 
-__version__ = "0.3.0"
+__version__ = "0.4.0"
 
 logger = logging.getLogger("plugins.streammirrarr")
 
@@ -142,6 +142,30 @@ class Plugin:
                     "Rebuilds failover streams on matched channels: attaches exact "
                     "stream_id matches and removes mismatched managed streams. A "
                     "backup is taken first. Proceed?"
+                ),
+            },
+        },
+        {
+            "id": "dedup_preview",
+            "label": "🔍 Preview duplicate cleanup",
+            "description": "Report duplicate channels (that share a primary stream) without deleting anything.",
+            "button_label": "Preview dedup",
+            "button_variant": "outline",
+        },
+        {
+            "id": "dedup_run",
+            "label": "🗑️ Remove duplicate channels",
+            "description": "Delete channels that share a primary stream with another (keeps one per stream).",
+            "button_label": "Remove dupes",
+            "button_variant": "filled",
+            "button_color": "red",
+            "confirm": {
+                "required": True,
+                "title": "Delete duplicate channels?",
+                "message": (
+                    "For each primary stream attached to more than one channel, this "
+                    "keeps one channel (EPG-bound, else lowest id) and DELETES the rest. "
+                    "A backup is taken first. This removes channels — proceed?"
                 ),
             },
         },
@@ -279,6 +303,17 @@ class Plugin:
                 ),
             },
             {
+                "id": "dedup_on_schedule",
+                "label": "Also remove duplicate channels after the daily run",
+                "type": "boolean",
+                "default": False,
+                "help_text": (
+                    "After the scheduled reconcile, delete channels that share a primary "
+                    "stream with another (keeps one per stream). Off by default — it "
+                    "deletes channels. A backup is taken each time."
+                ),
+            },
+            {
                 "id": "gotify_notify",
                 "label": "Gotify notification for scheduled runs",
                 "type": "select",
@@ -317,7 +352,9 @@ class Plugin:
         if action == "clear_lock":
             return self._action_clear_lock()
         if action in ("preview", "run"):
-            return self._action_start(dry_run=(action == "preview"), settings=settings)
+            return self._action_start("reconcile", dry_run=(action == "preview"), settings=settings)
+        if action in ("dedup_preview", "dedup_run"):
+            return self._action_start("dedup", dry_run=(action == "dedup_preview"), settings=settings)
         if action == "stop":
             self._cancel.set()
             return {"status": "ok", "message": "Cancellation requested."}
@@ -328,7 +365,7 @@ class Plugin:
         self._sched_stop.set()
 
     # --------------------------------------------------------------- actions
-    def _action_start(self, dry_run, settings):
+    def _action_start(self, job_kind, dry_run, settings):
         if self._job_thread is not None and self._job_thread.is_alive():
             return {"status": "error", "message": "A run is already in progress."}
         if not self._acquire_lock():
@@ -340,7 +377,7 @@ class Plugin:
         try:
             t = threading.Thread(
                 target=self._job_guarded,
-                args=(dry_run, dict(settings)),
+                args=(job_kind, dry_run, dict(settings)),
                 name="streammirrarr-job",
                 daemon=True,
             )
@@ -352,7 +389,8 @@ class Plugin:
             Plugin._job_thread = None
             logger.exception("streammirrarr could not start job thread")
             return {"status": "error", "message": f"Could not start run: {exc}"}
-        mode = "Preview (dry-run)" if dry_run else "Exact-match reconcile"
+        label = {"dedup": "Duplicate-channel cleanup", "reconcile": "Exact-match reconcile"}.get(job_kind, "Run")
+        mode = f"{label} (dry-run)" if dry_run else label
         return {
             "status": "queued",
             "message": f"{mode} started. Watch notifications, then check ‘View last results’.",
@@ -422,9 +460,12 @@ class Plugin:
             logger.debug("could not remove run lock", exc_info=True)
 
     # --------------------------------------------------------------- job body
-    def _job_guarded(self, dry_run, settings):
+    def _job_guarded(self, job_kind, dry_run, settings):
         try:
-            self._run_job(dry_run, settings)
+            if job_kind == "dedup":
+                self._dedup_channels(dry_run, settings)
+            else:
+                self._run_job(dry_run, settings)
         except Exception as exc:
             logger.exception("streammirrarr job failed")
             self._write_status({
@@ -646,6 +687,140 @@ class Plugin:
         logger.info("[Streammirrarr] run cancelled")
         return report
 
+    # ------------------------------------------------------- duplicate cleanup
+    def _dedup_channels(self, dry_run, settings):
+        """Delete channels that share a primary-account stream with another.
+
+        Dispatcharr's auto-sync creates duplicate channels when the provider's
+        24/7/event feeds rotate their stream_id, so several channels can end up
+        with the SAME primary stream at order 0. For each such stream, keep one
+        channel (EPG-bound preferred, then lowest id) and delete the rest. Only
+        touches true duplicates (same stream) — legitimately distinct feeds with
+        the same name but different stream_ids are left alone.
+        """
+        started = _now()
+        primary, _failovers, _managed = self._resolve_accounts(settings)
+        group_names = [g.strip() for g in (settings.get("channel_groups") or "").split(",") if g.strip()]
+        scoped_ids = set(self._scope_channels(settings, group_names).values_list("id", flat=True))
+
+        # channel -> its order-0 primary-account stream pk
+        by_stream = {}
+        for ch_id, spk in (
+            ChannelStream.objects.filter(
+                order=0, stream__m3u_account_id=primary.id, channel_id__in=scoped_ids
+            )
+            .values_list("channel_id", "stream_id")
+            .iterator()
+        ):
+            by_stream.setdefault(spk, []).append(ch_id)
+
+        dup_groups = {spk: ids for spk, ids in by_stream.items() if len(ids) > 1}
+        all_dup_ch = [c for ids in dup_groups.values() for c in ids]
+        epg_map = dict(Channel.objects.filter(id__in=all_dup_ch).values_list("id", "epg_data_id"))
+
+        keepers = set()
+        to_delete = []
+        for spk, ids in dup_groups.items():
+            # keeper: EPG-bound first (epg_data_id not None), then lowest id
+            ordered = sorted(ids, key=lambda c: (epg_map.get(c) is None, c))
+            keepers.add(ordered[0])
+            to_delete.extend(ordered[1:])
+        # A channel can carry more than one order-0 primary stream, so it can
+        # appear in two groups — as a keeper in one and a deletion in another.
+        # Never delete a keeper of any group, and de-dup so a channel queued from
+        # two groups isn't double-counted or double-deleted.
+        to_delete = [c for c in set(to_delete) if c not in keepers]
+
+        # sample of what would go (name + how many share the stream)
+        samples = []
+        for spk, ids in list(dup_groups.items())[:15]:
+            ch = Channel.objects.filter(id__in=ids).values("name").first()
+            samples.append({"stream_pk": spk, "channels": len(ids), "name": (ch or {}).get("name", "?")})
+        samples.sort(key=lambda s: -s["channels"])
+
+        report = {
+            "status": "done",
+            "dry_run": dry_run,
+            "job": "dedup",
+            "started": _iso(started),
+            "finished": _iso(_now()),
+            "primary": primary.name,
+            "dedup": {
+                "duplicate_stream_groups": len(dup_groups),
+                "channels_to_delete": len(to_delete),
+            },
+            "samples": {"worst_duplicates": samples},
+        }
+
+        if dry_run:
+            report["message"] = (
+                f"DRY-RUN: {len(to_delete)} duplicate channels across "
+                f"{len(dup_groups)} shared streams would be deleted. Nothing removed."
+            )
+            self._write_status(report)
+            logger.info("[Streammirrarr] %s", report["message"])
+            send_websocket_update(
+                "updates", "update",
+                {"type": "streammirrarr", "status": "done", "dry_run": True, "message": report["message"]},
+            )
+            return report
+
+        backup_path = self._backup_deleted_channels(to_delete) if to_delete else None
+        if to_delete and backup_path is None:
+            raise RuntimeError("dedup aborted: channel backup failed, refusing to delete")
+        if to_delete:
+            with transaction.atomic():
+                for chunk in _chunks(to_delete, 2000):
+                    Channel.objects.filter(id__in=chunk).delete()
+
+        report["backup"] = backup_path
+        report["message"] = (
+            f"Removed {len(to_delete)} duplicate channels across "
+            f"{len(dup_groups)} shared streams (kept one each)."
+        )
+        self._write_status(report)
+        logger.info("[Streammirrarr] %s (backup: %s)", report["message"], backup_path or "none")
+        send_websocket_update(
+            "updates", "update",
+            {"type": "streammirrarr", "status": "done", "message": report["message"]},
+        )
+        send_websocket_update("updates", "update", {"type": "channels_refresh"})
+        return report
+
+    def _backup_deleted_channels(self, channel_ids):
+        # Safety record of what's about to be deleted: channel scalar fields +
+        # (order, stream_pk) attachments. NOT a full restore (profile memberships
+        # and other cascaded relations aren't captured) — the deleted channels are
+        # duplicates, so the surviving twin retains the real mapping.
+        try:
+            data = []
+            streams = {}
+            for ch_id, spk, order in (
+                ChannelStream.objects.filter(channel_id__in=channel_ids)
+                .values_list("channel_id", "stream_id", "order")
+                .iterator()
+            ):
+                streams.setdefault(ch_id, []).append([order, spk])
+            for ch in Channel.objects.filter(id__in=channel_ids).values(
+                "id", "name", "channel_number", "channel_group_id", "epg_data_id", "tvg_id"
+            ):
+                ch["streams"] = sorted(streams.get(ch["id"], []))
+                data.append(ch)
+            ts = _now().strftime("%Y%m%d-%H%M%S")
+            path = os.path.join(PLUGIN_DIR, f"backup_deleted_channels_{ts}.json")
+            with open(path, "w", encoding="utf-8") as fh:
+                json.dump(data, fh)
+            existing = sorted(glob.glob(os.path.join(PLUGIN_DIR, "backup_deleted_channels_*.json")))
+            for old in existing[:-BACKUP_KEEP]:
+                try:
+                    os.remove(old)
+                except Exception:
+                    pass
+            return path
+        except Exception:
+            logger.exception("[Streammirrarr] channel backup failed (continuing)")
+            return None
+
     # ------------------------------------------------------------ channel scope
     def _scope_channels(self, settings, group_names):
         scope = (settings.get("channel_scope") or "all").strip()
@@ -838,6 +1013,12 @@ class Plugin:
                 f"{s.get('matched','?')} matched, {s.get('unmatched','?')} unmatched, "
                 f"{s.get('channels_changed','?')} changed"
             )
+        d = data.get("dedup")
+        if d:
+            lines.append(
+                f"duplicates: {d.get('channels_to_delete','?')} channels across "
+                f"{d.get('duplicate_stream_groups','?')} shared streams"
+            )
         if data.get("backup"):
             lines.append(f"backup: {data['backup']}")
         worst = (data.get("samples", {}) or {}).get("worst_overmatched", [])
@@ -845,6 +1026,11 @@ class Plugin:
             lines.append("worst over-matched cleaned up:")
             for w in worst[:10]:
                 lines.append(f"  -{w['removed']}  {w['channel']}")
+        wd = (data.get("samples", {}) or {}).get("worst_duplicates", [])
+        if wd:
+            lines.append("most-duplicated channels:")
+            for w in wd[:10]:
+                lines.append(f"  x{w['channels']}  {w['name']}")
         return "\n".join(lines)
 
     # --------------------------------------------------------------- gotify
@@ -927,11 +1113,15 @@ class Plugin:
             report = self._run_job(False, cfg)
             ok = bool(report and report.get("status") == "done")
             message = (report or {}).get("message", "no report")
+            if ok and bool(cfg.get("dedup_on_schedule", False)):
+                dreport = self._dedup_channels(False, cfg)
+                message = f"{message} | dedup: {(dreport or {}).get('message', '?')}"
             if ok:
                 _touch(success_marker)
                 self._cleanup_markers()
         except Exception as exc:
             logger.exception("streammirrarr scheduled run failed")
+            ok = False
             message = f"{exc}"
         finally:
             close_old_connections()
