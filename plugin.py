@@ -61,7 +61,7 @@ except Exception:  # pragma: no cover - defensive: never block on websocket impo
     def send_websocket_update(*_a, **_k):
         return None
 
-__version__ = "0.4.2"
+__version__ = "0.4.3"
 
 logger = logging.getLogger("plugins.streammirrarr")
 
@@ -88,7 +88,6 @@ _SCHED_DEFAULTS = {
     "primary_account": "",
     "failover_accounts": "",
     "channel_scope": "all",
-    "channel_profile": "",
     "channel_groups": "",
     "remove_mismatched": True,
     "skip_stale": True,
@@ -230,7 +229,13 @@ class Plugin:
 
         names = [a["name"] for a in accounts]
         acct_options = [{"value": n, "label": n} for n in names]
-        profile_options = [{"value": p["name"], "label": p["name"]} for p in profiles]
+        # Fold each profile straight into the scope select (value "profile:<name>")
+        # so there's no separate nullable dropdown that the Dispatcharr UI can
+        # persist as null when left untouched.
+        scope_options = [
+            {"value": "all", "label": "All channels"},
+            {"value": "auto_created", "label": "Auto-created channels only"},
+        ] + [{"value": f"profile:{p['name']}", "label": f"Profile: {p['name']}"} for p in profiles]
 
         primary_default = self._detect_primary_name(accounts)
         failover_default = ",".join(
@@ -266,21 +271,9 @@ class Plugin:
                 "id": "channel_scope",
                 "label": "Which channels to process",
                 "type": "select",
-                "options": [
-                    {"value": "all", "label": "All channels"},
-                    {"value": "auto_created", "label": "Auto-created channels only"},
-                    {"value": "profile", "label": "A specific channel profile"},
-                ],
+                "options": scope_options,
                 "default": "all",
-                "help_text": "Limit the channels this plugin touches.",
-            },
-            {
-                "id": "channel_profile",
-                "label": "Channel profile (when scope = profile)",
-                "type": "select",
-                "options": profile_options,
-                "default": (profiles[0]["name"] if profiles else ""),
-                "help_text": "Only used when 'Which channels' is set to a profile.",
+                "help_text": "Limit the channels this plugin touches. Pick a 'Profile: …' to scope to one channel profile.",
             },
             {
                 "id": "channel_groups",
@@ -831,27 +824,32 @@ class Plugin:
         qs = Channel.objects.all()
         if scope == "auto_created":
             qs = qs.filter(auto_created=True)
-        elif scope == "profile":
-            pname = (settings.get("channel_profile") or "").strip()
+        elif scope.startswith("profile:") or scope == "profile":
+            # New format encodes the profile in the scope value ("profile:<name>").
+            # Old format was scope == "profile" plus a separate channel_profile
+            # setting — still honored for backward compatibility.
+            if scope.startswith("profile:"):
+                pname = scope.split("profile:", 1)[1].strip()
+            else:
+                pname = (settings.get("channel_profile") or "").strip()
             if not pname:
-                # The saved value can arrive blank (dynamically-populated selects
-                # sometimes serialize to empty). If exactly one profile exists it's
-                # unambiguous — use it rather than failing the (scheduled) run.
+                # Legacy configs could persist a blank profile. If exactly one
+                # profile exists it's unambiguous — use it rather than failing.
                 prof_names = list(
                     ChannelProfile.objects.order_by("name").values_list("name", flat=True)
                 )
                 if len(prof_names) == 1:
                     pname = prof_names[0]
                     logger.warning(
-                        "[Streammirrarr] 'profile' scope with no profile selected; "
+                        "[Streammirrarr] profile scope with no profile selected; "
                         "using the only profile present: %r",
                         pname,
                     )
                 else:
                     raise ValueError(
-                        "Channel scope is 'profile' but no profile is selected. "
+                        "Channel scope is a profile but none is selected. "
                         f"Available profiles: {', '.join(prof_names) or '(none)'}. "
-                        "Pick one in settings, or set scope to 'All channels'."
+                        "Pick a 'Profile: …' scope in settings."
                     )
             ch_ids = ChannelProfileMembership.objects.filter(
                 channel_profile__name=pname, enabled=True

@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.4.3 — 2026-07-09T20:00:00Z
+- Fold channel-profile selection into the **"Which channels to process"** dropdown
+  (options now include `Profile: <name>` per profile) and remove the separate
+  `channel_profile` select. That second dropdown was dynamically populated, and
+  Dispatcharr's settings form persisted it as `null` when left untouched — which
+  made `profile` scope ambiguous (and once crashed scheduled runs). One select
+  can't go null. Old `profile` + `channel_profile` configs still work
+  (backward-compatible).
+
 ## v0.4.2 — 2026-07-09T19:30:00Z
 - Fix scheduler-greenlet leak: `_ensure_scheduler` now checks live threads by name
   (survives module re-import on reload) instead of a class attr that reset on every
