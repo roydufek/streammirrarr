@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.4.2 — 2026-07-09T19:30:00Z
+- Fix scheduler-greenlet leak: `_ensure_scheduler` now checks live threads by name
+  (survives module re-import on reload) instead of a class attr that reset on every
+  reload, which spawned a new scheduler greenlet each time.
+- Scheduler tick no longer calls `self.fields` (which ran a ~12k-row Channel
+  aggregate for primary-account auto-detect in every worker every 30s). It now
+  merges static defaults, so the tick is a single small `PluginConfig` lookup.
+  Both reduce needless per-worker DB load under uWSGI+gevent.
+
 ## v0.4.1 — 2026-07-09T18:45:00Z
 - Fix: manual actions (Preview/Run/dedup) now run **synchronously** and return the
   real result, instead of spawning a background thread. On Dispatcharr's

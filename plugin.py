@@ -61,7 +61,7 @@ except Exception:  # pragma: no cover - defensive: never block on websocket impo
     def send_websocket_update(*_a, **_k):
         return None
 
-__version__ = "0.4.1"
+__version__ = "0.4.2"
 
 logger = logging.getLogger("plugins.streammirrarr")
 
@@ -79,6 +79,25 @@ SCHED_WINDOW_SECS = 6 * 3600  # keep retrying for this long after the target tim
 SCHED_COOLDOWN_SECS = 15 * 60  # minimum gap between scheduled attempts
 LOCK_STALE_SECS = 30 * 60     # a run lock older than this (dead holder) is stolen
 BACKUP_KEEP = 7               # rotating pre-run backups to retain
+
+# Static defaults the scheduler tick merges over saved settings. Kept static on
+# purpose: the tick runs every 30s in every uWSGI worker, and calling self.fields
+# there would fire a ~12k-row Channel aggregate (primary-account auto-detect) each
+# time. Blank primary/profile are resolved lazily only when a run actually fires.
+_SCHED_DEFAULTS = {
+    "primary_account": "",
+    "failover_accounts": "",
+    "channel_scope": "all",
+    "channel_profile": "",
+    "channel_groups": "",
+    "remove_mismatched": True,
+    "skip_stale": True,
+    "schedule_time": "",
+    "dedup_on_schedule": False,
+    "gotify_notify": "off",
+    "gotify_server_url": "",
+    "gotify_token": "",
+}
 
 
 def _now():
@@ -1046,8 +1065,13 @@ class Plugin:
 
     # ------------------------------------------------------------- scheduler
     def _ensure_scheduler(self):
-        if Plugin._sched_thread is not None and Plugin._sched_thread.is_alive():
-            return
+        # Reload-safe. A plugin reload re-imports the module and resets the class
+        # attr, so checking Plugin._sched_thread misses the greenlet started by the
+        # PREVIOUS module version — a new scheduler then spawns on every reload and
+        # they leak. Check live threads by name instead (survives re-import).
+        for t in threading.enumerate():
+            if t.name == "streammirrarr-sched" and t.is_alive():
+                return
         Plugin._sched_stop.clear()
         t = threading.Thread(target=self._scheduler_loop, name="streammirrarr-sched", daemon=True)
         Plugin._sched_thread = t
@@ -1116,18 +1140,13 @@ class Plugin:
         from apps.plugins.models import PluginConfig
         cfg = PluginConfig.objects.filter(key=PLUGIN_KEY).values("settings").first()
         saved = (cfg or {}).get("settings", {}) or {}
-        # Merge field defaults so a never-saved setting still has its default.
-        try:
-            defaults = {f["id"]: f.get("default") for f in self.fields}
-            merged = dict(defaults)
-            # Only override with non-None saved values. The Dispatcharr UI can
-            # persist a field as null (e.g. a select left at its placeholder), and
-            # a null must NOT clobber the field's default — that's what actually
-            # broke the scheduled run (channel_profile came through as null).
-            merged.update({k: v for k, v in saved.items() if v is not None})
-            return merged
-        except Exception:
-            return saved
+        # Merge STATIC defaults (not self.fields — see _SCHED_DEFAULTS). Only
+        # override with non-None saved values: the Dispatcharr UI can persist a
+        # field as null (e.g. a select left at its placeholder), and a null must
+        # NOT clobber the default (that once broke scheduled runs on channel_profile).
+        merged = dict(_SCHED_DEFAULTS)
+        merged.update({k: v for k, v in saved.items() if v is not None})
+        return merged
 
     def _parse_hhmm(self, val):
         val = (val or "").strip()
