@@ -1,5 +1,23 @@
 # Changelog
 
+## v0.5.0 — 2026-07-10T17:30:00Z
+- **Channel-drop safeguard.** Dispatcharr auto-deletes auto-created channels when
+  a provider M3U refresh comes back empty — a transient provider 404 during the
+  nightly refresh can wipe thousands of channels in one sync (streams get a stale
+  grace period; channels do not). Streammirrarr now tracks the primary account's
+  channel count between runs and, if it collapses (drops to ≤50% of the baseline,
+  above a 50-channel floor):
+  - **fires a HIGH-priority Gotify alert** (even when notifications are set to Off),
+    with recovery steps — a heads-up so you find out in minutes, not days;
+  - **skips the scheduled duplicate cleanup** and **refuses a manual dedup**, so the
+    plugin never deletes channels during the churn of a half-recreated state;
+  - surfaces the count + baseline in "View last results" and the run report.
+  New **"Channel-drop safeguard"** setting (on by default). The plugin still never
+  deletes channels itself — this only detects Dispatcharr's own behavior and warns.
+  Diagnosed from a real incident: a trex-3 provider 404 at 00:29 UTC made
+  Dispatcharr's auto channel sync delete all 12,074 channels; recovery was a single
+  account refresh.
+
 ## v0.4.4 — 2026-07-09T20:20:00Z
 - Backups (`backup_channelstream_*.json`, `backup_deleted_channels_*.json`) now
   write to a persistent **`streammirrarr-backups/`** dir beside the plugins folder

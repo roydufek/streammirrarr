@@ -61,7 +61,7 @@ except Exception:  # pragma: no cover - defensive: never block on websocket impo
     def send_websocket_update(*_a, **_k):
         return None
 
-__version__ = "0.4.4"
+__version__ = "0.5.0"
 
 logger = logging.getLogger("plugins.streammirrarr")
 
@@ -82,6 +82,17 @@ try:
 except Exception:
     BACKUP_DIR = PLUGIN_DIR
 BACKUP_GLOB = os.path.join(BACKUP_DIR, "backup_channelstream_*.json")
+
+# Channel-drop safeguard. Dispatcharr auto-deletes auto-created channels when a
+# provider refresh returns nothing (a transient provider 404 can wipe thousands
+# in one sync; streams get a stale grace period, channels do not). We track the
+# primary account's channel count in this file and, if it collapses, skip any
+# destructive work and fire a high-priority alert. Lives beside the backups so it
+# survives plugin updates. Only meaningful above a floor so tiny setups (a handful
+# of channels) never false-alarm.
+HEALTH_FILE = os.path.join(BACKUP_DIR, "health.json")
+HEALTH_MIN_BASELINE = 50   # never alarm below this many channels
+HEALTH_DROP_FRAC = 0.5     # current <= 50% of baseline = a collapse
 
 # Scheduler tuning.
 SCHED_TICK_SECS = 30          # how often the scheduler thread wakes
@@ -106,6 +117,7 @@ _SCHED_DEFAULTS = {
     "gotify_notify": "off",
     "gotify_server_url": "",
     "gotify_token": "",
+    "health_alert": True,
 }
 
 
@@ -363,6 +375,21 @@ class Plugin:
                 "placeholder": "A…",
                 "help_text": "Your Gotify application token. Stored in the DB, never committed.",
             },
+            {
+                "id": "health_alert",
+                "label": "Channel-drop safeguard (recommended)",
+                "type": "boolean",
+                "default": True,
+                "help_text": (
+                    "Watch the primary account's channel count. If it suddenly "
+                    "collapses — e.g. the provider had an outage and Dispatcharr "
+                    "auto-deleted the channels — skip the duplicate cleanup and send "
+                    "a HIGH-priority Gotify alert, even if the notification setting "
+                    "above is Off. Set the Gotify fields for the alert to reach you. "
+                    "The plugin never deletes channels itself; this is a heads-up so "
+                    "you can re-refresh the account and recover."
+                ),
+            },
         ]
 
     # --------------------------------------------------------------- dispatch
@@ -494,6 +521,10 @@ class Plugin:
     def _run_job(self, dry_run, settings):
         started = _now()
         primary, failovers, managed_ids = self._resolve_accounts(settings)
+        # Channel-drop safeguard: snapshot the primary's channel count BEFORE we
+        # touch anything (reconcile never creates channels, so a collapse here is
+        # Dispatcharr's doing). Records the baseline on a real run; preview only reads.
+        health = self._eval_health(primary, record=not dry_run)
         remove_mismatched = bool(settings.get("remove_mismatched", True))
         skip_stale = bool(settings.get("skip_stale", True))
         group_names = [g.strip() for g in (settings.get("channel_groups") or "").split(",") if g.strip()]
@@ -621,6 +652,7 @@ class Plugin:
             "skip_stale": skip_stale,
             "scope": settings.get("channel_scope", "all"),
             "groups": group_names or "ALL",
+            "health": health,
             "stats": stats,
             "samples": {
                 "worst_overmatched": [
@@ -672,8 +704,16 @@ class Plugin:
             f"~{stats['streams_reordered']} reordered), "
             f"{stats['unmatched']} channels had no primary match."
         )
+        if health and health.get("cliff"):
+            report["message"] += (
+                f"  ⚠️ Channel-drop detected: '{health['primary']}' has "
+                f"{health['current']} channels vs baseline {health['baseline']} "
+                f"(-{health['pct']}%) — possible provider outage."
+            )
         self._write_status(report)
         logger.info("[Streammirrarr] %s (backup: %s)", report["message"], backup_path or "none")
+        if health and health.get("alert") and bool(settings.get("health_alert", True)):
+            self._emergency_alert(settings, health)
         send_websocket_update(
             "updates", "update",
             {"type": "streammirrarr", "status": "done", "message": report["message"]},
@@ -707,6 +747,31 @@ class Plugin:
         """
         started = _now()
         primary, _failovers, _managed = self._resolve_accounts(settings)
+
+        # Channel-drop safeguard: never delete "duplicates" while the channel list
+        # is collapsed (a provider-outage wipe leaves a churning, half-recreated
+        # state where dedup could destroy legitimately-wanted channels). Measure
+        # only — the reconcile path owns baseline recording.
+        health = self._eval_health(primary, record=False)
+        if not dry_run and health and health.get("cliff"):
+            report = {
+                "status": "aborted", "dry_run": dry_run, "job": "dedup",
+                "started": _iso(started), "finished": _iso(_now()),
+                "primary": primary.name, "health": health,
+                "message": (
+                    f"Refused to remove duplicates: '{health['primary']}' has only "
+                    f"{health['current']} channels vs baseline {health['baseline']} "
+                    f"(-{health['pct']}%). This looks like a provider-outage wipe. "
+                    "Recover channels first (refresh the account, run the reconcile), "
+                    "then retry dedup."
+                ),
+            }
+            self._write_status(report)
+            logger.warning("[Streammirrarr] %s", report["message"])
+            if bool(settings.get("health_alert", True)):
+                self._emergency_alert(settings, health)
+            return report
+
         group_names = [g.strip() for g in (settings.get("channel_groups") or "").split(",") if g.strip()]
         scoped_ids = set(self._scope_channels(settings, group_names).values_list("id", flat=True))
 
@@ -1005,6 +1070,80 @@ class Plugin:
         except Exception:
             return None
 
+    # --------------------------------------------------- channel-drop safeguard
+    def _read_health(self):
+        try:
+            with open(HEALTH_FILE, "r", encoding="utf-8") as fh:
+                return json.load(fh) or {}
+        except Exception:
+            return {}
+
+    def _write_health(self, data):
+        try:
+            tmp = HEALTH_FILE + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as fh:
+                json.dump(data, fh)
+            os.replace(tmp, HEALTH_FILE)
+        except Exception:
+            logger.debug("could not write health file", exc_info=True)
+
+    def _eval_health(self, primary, record):
+        """Compare the primary account's channel count to the tracked baseline.
+
+        Returns a dict {primary, primary_id, current, baseline, cliff, dropped,
+        pct, alert} — or None if the count can't be read. ``cliff`` is True when
+        the count has collapsed below HEALTH_DROP_FRAC of the baseline (and the
+        baseline is above the floor). ``alert`` is True only on the FIRST real run
+        that sees a new collapse, so a heads-up fires once, not every day.
+
+        When ``record`` (a real run, not a preview), the baseline is persisted:
+        the collapse is remembered on the first hit (baseline held so the drop is
+        measurable, alerted flag set); on any other outcome the current count is
+        accepted as the new normal. That absorbs a legitimate reduction after one
+        cycle instead of alarming forever, while still catching a true wipe.
+        """
+        try:
+            current = Channel.objects.filter(auto_created_by=primary.id).count()
+        except Exception:
+            logger.debug("health count failed", exc_info=True)
+            return None
+        state = self._read_health()
+        baseline = int(state.get("baseline", 0) or 0)
+        alerted = bool(state.get("alerted", False))
+        cliff = baseline >= HEALTH_MIN_BASELINE and current <= baseline * HEALTH_DROP_FRAC
+        new_alert = bool(cliff and not alerted and record)
+        dropped = max(0, baseline - current)
+        pct = int(round(100 * dropped / baseline)) if baseline else 0
+        if record:
+            if new_alert:
+                # Hold the high baseline (so the drop stays measurable) and mark it.
+                self._write_health({"baseline": baseline, "alerted": True,
+                                    "current": current, "updated": _iso(_now())})
+            else:
+                # Accept the current count as the new normal; clear the flag.
+                self._write_health({"baseline": max(current, 0), "alerted": False,
+                                    "current": current, "updated": _iso(_now())})
+        return {
+            "primary": primary.name, "primary_id": primary.id, "current": current,
+            "baseline": baseline, "cliff": cliff, "dropped": dropped, "pct": pct,
+            "alert": new_alert,
+        }
+
+    def _emergency_alert(self, settings, health):
+        msg = (
+            f"Channels for the primary account '{health.get('primary','?')}' dropped "
+            f"from {health.get('baseline','?')} to {health.get('current','?')} "
+            f"(-{health.get('pct','?')}%).\n\n"
+            "This is the signature of a provider outage: an M3U refresh came back "
+            "empty and Dispatcharr auto-deleted the auto-created channels. "
+            "Duplicate cleanup was skipped as a precaution — Streammirrarr does not "
+            "delete channels itself.\n\n"
+            "To recover: refresh the primary M3U account (once the provider is back), "
+            "then run Streammirrarr. Dispatcharr recreates the channels and the "
+            "failover streams reattach."
+        )
+        self._gotify_send(settings, "Streammirrarr ⚠️ CHANNEL DROP", msg, 8)
+
     def _progress(self, idx, total, dry_run):
         msg = f"{'Preview' if dry_run else 'Reconcile'}: scanned {idx}/{total} channels…"
         send_websocket_update(
@@ -1031,6 +1170,13 @@ class Plugin:
                 f"duplicates: {d.get('channels_to_delete','?')} channels across "
                 f"{d.get('duplicate_stream_groups','?')} shared streams"
             )
+        h = data.get("health")
+        if h:
+            flag = " ⚠️ COLLAPSE" if h.get("cliff") else ""
+            lines.append(
+                f"channel-health: {h.get('current','?')} on '{h.get('primary','?')}' "
+                f"(baseline {h.get('baseline','?')}){flag}"
+            )
         if data.get("backup"):
             lines.append(f"backup: {data['backup']}")
         worst = (data.get("samples", {}) or {}).get("worst_overmatched", [])
@@ -1046,12 +1192,8 @@ class Plugin:
         return "\n".join(lines)
 
     # --------------------------------------------------------------- gotify
-    def _notify_gotify(self, settings, ok, message):
-        mode = (settings.get("gotify_notify") or "off").strip()
-        if mode == "off":
-            return
-        if mode == "on_failure" and ok:
-            return
+    def _gotify_send(self, settings, title, message, priority):
+        """Post to Gotify if it's configured. No mode gating — the caller decides."""
         server = (settings.get("gotify_server_url") or "").strip().rstrip("/")
         token = (settings.get("gotify_token") or "").strip()
         if server and token:
@@ -1060,8 +1202,6 @@ class Plugin:
             url = (settings.get("gotify_url") or "").strip()  # legacy single-field fallback
         if not url:
             return
-        title = "Streammirrarr ✅" if ok else "Streammirrarr ❌ FAILED"
-        priority = 3 if ok else 7
         try:
             data = urllib.parse.urlencode(
                 {"title": title, "message": message[:1800], "priority": priority}
@@ -1070,6 +1210,16 @@ class Plugin:
             urllib.request.urlopen(req, timeout=10).read()
         except Exception:
             logger.warning("[Streammirrarr] gotify notify failed", exc_info=True)
+
+    def _notify_gotify(self, settings, ok, message):
+        """Routine post-run notification, gated by the gotify_notify mode."""
+        mode = (settings.get("gotify_notify") or "off").strip()
+        if mode == "off":
+            return
+        if mode == "on_failure" and ok:
+            return
+        title = "Streammirrarr ✅" if ok else "Streammirrarr ❌ FAILED"
+        self._gotify_send(settings, title, message, 3 if ok else 7)
 
     # ------------------------------------------------------------- scheduler
     def _ensure_scheduler(self):
@@ -1129,7 +1279,12 @@ class Plugin:
             report = self._run_job(False, cfg)
             ok = bool(report and report.get("status") == "done")
             message = (report or {}).get("message", "no report")
-            if ok and bool(cfg.get("dedup_on_schedule", False)):
+            health = (report or {}).get("health") or {}
+            if health.get("cliff"):
+                # A collapse fired the safeguard (alert already sent from _run_job).
+                # Skip dedup — deleting "duplicates" during a wipe is dangerous.
+                message = f"{message} | ⚠️ channel-drop: skipped dedup"
+            elif ok and bool(cfg.get("dedup_on_schedule", False)):
                 dreport = self._dedup_channels(False, cfg)
                 message = f"{message} | dedup: {(dreport or {}).get('message', '?')}"
             if ok:
